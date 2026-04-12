@@ -16,6 +16,10 @@ plugins:
   - jekyll-include-cache
   - jekyll-remote-theme
 
+# Pages
+include:
+  - _pages
+
 # Pagination
 paginate: 10
 paginate_path: /page:num/
