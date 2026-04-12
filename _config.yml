@@ -4,7 +4,8 @@ url: "https://holeman79.github.io"
 baseurl: ""
 
 # Theme
-theme: minima
+remote_theme: mmistakes/minimal-mistakes
+minimal_mistakes_skin: "dark"
 future: true
 
 # Plugins
@@ -12,6 +13,8 @@ plugins:
   - jekyll-feed
   - jekyll-sitemap
   - jekyll-paginate
+  - jekyll-include-cache
+  - jekyll-remote-theme
 
 # Pagination
 paginate: 10
@@ -21,12 +24,21 @@ paginate_path: /page:num/
 author:
   name: "holeman79"
   bio: "Backend Developer"
+  avatar: "/assets/images/avatar.png"
   location: "South Korea"
+  links:
+    - label: "GitHub"
+      icon: "fab fa-fw fa-github"
+      url: "https://github.com/holeman79"
 
 # Category
 category_archive:
   type: liquid
   path: /categories/
+
+tag_archive:
+  type: liquid
+  path: /tags/
 
 # Comments (Giscus)
 comments:
@@ -37,7 +49,7 @@ comments:
     category_id: "DIC_kwDOSAtlns4C6sCk"
     mapping: "pathname"
     reactions_enabled: "1"
-    theme: "light"
+    theme: "dark"
 
 # Defaults
 defaults:
@@ -45,5 +57,12 @@ defaults:
       path: ""
       type: posts
     values:
-      layout: post
+      layout: single
+      author_profile: true
+      read_time: true
       comments: true
+      share: true
+      related: true
+      show_date: true
+      toc: true
+      toc_sticky: true

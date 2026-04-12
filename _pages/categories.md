@@ -1,5 +1,5 @@
 ---
-title: "카테고리"
+title: "Categories"
 layout: categories
 permalink: /categories/
 author_profile: true
