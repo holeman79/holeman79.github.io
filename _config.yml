@@ -66,3 +66,11 @@ defaults:
       show_date: true
       toc: true
       toc_sticky: true
+      sidebar:
+        nav: "sidebar-categories"
+  - scope:
+      path: ""
+      type: pages
+    values:
+      sidebar:
+        nav: "sidebar-categories"

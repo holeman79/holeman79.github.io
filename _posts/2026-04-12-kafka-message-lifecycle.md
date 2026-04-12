@@ -1,7 +1,7 @@
 ---
 title: "Kafka 메시지 생명주기 — 발행부터 삭제까지"
 date: 2026-04-12
-categories: [Kafka]
+categories: [Infra]
 tags: [kafka, message-queue, consumer-group, offset, spring-kafka]
 toc: true
 toc_sticky: true

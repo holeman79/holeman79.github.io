@@ -3,3 +3,17 @@ main:
     url: /categories/
   - title: "Tags"
     url: /tags/
+
+sidebar-categories:
+  - title: "전체보기"
+    url: /
+  - title: "AI"
+    url: /categories/ai/
+  - title: "Java & Kotlin"
+    url: /categories/java-kotlin/
+  - title: "Spring"
+    url: /categories/spring/
+  - title: "Database"
+    url: /categories/database/
+  - title: "Infra"
+    url: /categories/infra/

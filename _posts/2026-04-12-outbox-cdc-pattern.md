@@ -1,7 +1,7 @@
 ---
 title: "Outbox + CDC 패턴 — 분산 시스템에서 데이터 정합성 보장하기"
 date: 2026-04-12T11:00:00+09:00
-categories: [Architecture]
+categories: [Infra]
 tags: [outbox-pattern, cdc, kafka, mongodb, eventual-consistency]
 ---
 
