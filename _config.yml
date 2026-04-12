@@ -4,15 +4,13 @@ url: "https://holeman79.github.io"
 baseurl: ""
 
 # Theme
-remote_theme: mmistakes/minimal-mistakes
-minimal_mistakes_skin: "default"
+theme: minima
 
 # Plugins
 plugins:
   - jekyll-feed
   - jekyll-sitemap
   - jekyll-paginate
-  - jekyll-include-cache
 
 # Pagination
 paginate: 10
@@ -33,9 +31,9 @@ category_archive:
 comments:
   provider: "giscus"
   giscus:
-    repo_id: ""
-    category_name: "Blog Comments"
-    category_id: ""
+    repo_id: "R_kgDOSAtlng"
+    category_name: "General"
+    category_id: "DIC_kwDOSAtlns4C6sCk"
     mapping: "pathname"
     reactions_enabled: "1"
     theme: "light"
@@ -46,10 +44,5 @@ defaults:
       path: ""
       type: posts
     values:
-      layout: single
-      author_profile: true
-      read_time: true
+      layout: post
       comments: true
-      share: true
-      related: true
-      show_date: true
