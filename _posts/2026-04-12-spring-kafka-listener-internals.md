@@ -1,6 +1,6 @@
 ---
 title: "@KafkaListener는 AOP가 아니다 — Spring Kafka 내부 동작 원리"
-date: 2026-04-13T10:00:00+09:00
+date: 2026-04-12T10:00:00+09:00
 categories: [Spring]
 tags: [spring-kafka, kafka-listener, bean-post-processor, aop]
 ---
