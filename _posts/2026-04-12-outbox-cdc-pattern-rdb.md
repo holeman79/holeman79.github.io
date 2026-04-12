@@ -2,7 +2,7 @@
 title: "Outbox + CDC 패턴 (RDB편) — JPA + MySQL에서 데이터 정합성 보장하기"
 date: 2026-04-12T12:00:00+09:00
 categories: [Infra]
-tags: [outbox-pattern, cdc, kafka, mysql, jpa, debezium, eventual-consistency]
+tags: [outbox-pattern, cdc, kafka, kafka-connect, mysql, jpa, debezium, eventual-consistency]
 toc: true
 toc_sticky: true
 ---
@@ -257,6 +257,151 @@ public class OutboxPollingPublisher {
 |------|------|------|
 | **Debezium (CDC)** | 실시간, binlog 기반이라 DB 부하 적음 | 인프라 구성 복잡 |
 | **Polling** | 구현 간단, 추가 인프라 불필요 | 지연 발생, DB 폴링 부하 |
+
+### Kafka Connect — Debezium이 동작하는 플랫폼
+
+Debezium은 단독으로 실행되는 애플리케이션이 아니다. **Kafka Connect**라는 프레임워크 위에서 동작하는 **Connector 플러그인**이다.
+
+#### Kafka Connect란?
+
+Kafka Connect는 외부 시스템과 Kafka 사이에서 데이터를 주고받는 **표준화된 통합 프레임워크**다.
+
+```
+┌──────────────┐     ┌─────────────────────┐     ┌──────────┐
+│ MySQL        │────→│ Kafka Connect       │────→│ Kafka    │
+│ PostgreSQL   │     │  ├─ Source Connector │     │          │
+│ MongoDB      │     │  │  (Debezium 등)   │     │  토픽들   │
+│              │     │  │                   │     │          │
+│ Elasticsearch│←────│  └─ Sink Connector   │←────│          │
+│ S3           │     │     (ES Sink 등)     │     │          │
+└──────────────┘     └─────────────────────┘     └──────────┘
+```
+
+| 종류 | 방향 | 예시 |
+|------|------|------|
+| **Source Connector** | 외부 시스템 → Kafka | Debezium MySQL, Debezium PostgreSQL |
+| **Sink Connector** | Kafka → 외부 시스템 | Elasticsearch Sink, S3 Sink, JDBC Sink |
+
+Debezium은 **Source Connector**다. MySQL의 binlog를 읽어서 Kafka 토픽으로 발행한다.
+
+#### Kafka Connect의 장점
+
+**별도 코드 작성 없이 설정만으로 데이터 파이프라인을 구성**할 수 있다.
+
+```bash
+# Connector 등록 (REST API)
+curl -X POST http://kafka-connect:8083/connectors \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "outbox-connector",
+    "config": {
+      "connector.class": "io.debezium.connector.mysql.MySqlConnector",
+      "database.hostname": "mysql-host",
+      "database.port": "3306",
+      "database.user": "debezium",
+      "database.password": "password",
+      "database.server.id": "1",
+      "table.include.list": "shop.outbox_events",
+      "transforms": "outbox",
+      "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
+      "transforms.outbox.route.by.field": "routing_topic"
+    }
+  }'
+
+# Connector 상태 확인
+curl http://kafka-connect:8083/connectors/outbox-connector/status
+
+# Connector 목록 조회
+curl http://kafka-connect:8083/connectors
+
+# Connector 삭제
+curl -X DELETE http://kafka-connect:8083/connectors/outbox-connector
+```
+
+Kafka Connect 클러스터에 REST API로 Connector를 등록/삭제/관리한다. Java 코드를 작성하거나 애플리케이션을 빌드할 필요가 없다.
+
+#### Standalone vs Distributed 모드
+
+| 모드 | 특징 | 용도 |
+|------|------|------|
+| **Standalone** | 단일 프로세스, 설정 파일 기반 | 개발/테스트 |
+| **Distributed** | 여러 Worker가 클러스터 구성, REST API 기반 | 운영 환경 |
+
+운영에서는 **Distributed 모드**를 사용한다. 여러 Worker 노드가 클러스터를 이루며, Connector의 Task를 자동으로 분배한다. Worker가 죽으면 다른 Worker가 Task를 이어받는다.
+
+### Debezium 장애 복구 — 데이터를 놓치지 않는 원리
+
+Debezium이 장애 상황에서도 데이터 정합성을 유지할 수 있는 이유는 **offset 관리** 덕분이다.
+
+#### binlog offset 저장
+
+Debezium은 MySQL binlog의 어디까지 읽었는지를 **Kafka 내부 토픽(`connect-offsets`)**에 저장한다.
+
+```
+1. binlog position (mysql-bin.000003, offset 12345) 까지 읽음
+2. 해당 변경을 Kafka로 발행
+3. binlog position을 connect-offsets 토픽에 커밋
+```
+
+이 구조는 Kafka Consumer의 `__consumer_offsets`와 동일한 원리다.
+
+#### 장애 시나리오별 복구
+
+**시나리오 1: Debezium Worker 다운**
+
+```
+1. binlog position 12345까지 처리 후 offset 커밋
+2. Worker 다운
+3. Worker 재시작 (또는 다른 Worker가 Task 인계)
+4. connect-offsets에서 마지막 offset 조회 → 12345
+5. binlog position 12345 이후부터 다시 읽기 시작
+```
+
+Kafka Consumer가 `__consumer_offsets`에서 마지막 읽은 위치를 복구하는 것과 똑같다.
+
+**시나리오 2: Kafka 발행 성공 → offset 커밋 전 다운**
+
+```
+1. binlog 변경을 Kafka로 발행 성공
+2. offset 커밋 전에 Worker 다운
+3. 재시작 → 마지막 커밋된 offset부터 다시 읽기
+4. 같은 binlog 변경을 다시 Kafka로 발행 (중복)
+```
+
+이 경우 **같은 메시지가 중복 발행**된다. 따라서 **at-least-once** 전달이며, Consumer 측에서 멱등한 처리가 필수적이다.
+
+**시나리오 3: MySQL 다운 → 복구**
+
+```
+1. MySQL 다운
+2. Debezium 연결 실패 → 재연결 대기 (backoff)
+3. MySQL 복구
+4. Debezium 재연결 → 마지막 binlog position부터 재개
+```
+
+MySQL의 binlog는 `expire_logs_days` 설정에 따라 보존된다 (기본 30일). Debezium이 다운된 동안 발생한 변경도 binlog에 남아있으므로, 복구 후 누락 없이 처리할 수 있다. 단, binlog 보존 기간을 초과하면 **스냅샷부터 다시 수행**해야 한다.
+
+#### 정리: 장애 복구 메커니즘
+
+```
+MySQL binlog                 Kafka (connect-offsets)
+  │                              │
+  │ binlog는 디스크에 보존         │ offset은 Kafka 토픽에 보존
+  │ (expire_logs_days)           │ (무기한)
+  │                              │
+  └──── Debezium 재시작 시 ───────┘
+         두 위치를 비교하여
+         놓친 부분부터 재처리
+```
+
+| 장애 상황 | 데이터 유실 | 중복 발생 | 복구 방식 |
+|-----------|:---------:|:---------:|----------|
+| Debezium 다운 → 재시작 | X | 가능 | connect-offsets에서 위치 복구 |
+| Kafka 발행 후 offset 커밋 전 다운 | X | O | 같은 메시지 재발행 (at-least-once) |
+| MySQL 다운 → 복구 | X | X | binlog에서 이어서 읽기 |
+| binlog 만료 (장기 다운) | 가능 | X | 스냅샷 재수행 필요 |
+
+**핵심: Debezium은 "유실보다 중복이 낫다"는 at-least-once 전략**을 따른다. 중복은 Consumer의 멱등성으로 해결하고, 유실은 원천적으로 방지한다.
 
 ### 5. Consumer — Kafka 메시지 수신
 
