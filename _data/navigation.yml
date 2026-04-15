@@ -23,3 +23,5 @@ sidebar-categories:
         children:
           - title: "spring-db1"
             url: /categories/spring-db1/
+          - title: "spring-db2"
+            url: /categories/spring-db2/
