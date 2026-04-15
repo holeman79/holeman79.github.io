@@ -17,7 +17,9 @@ sidebar-categories:
     url: /categories/database/
   - title: "Infra"
     url: /categories/infra/
-  - title: "Inflearn / 김영한"
+  - title: "Inflearn"
     children:
-      - title: "spring-db1"
-        url: /categories/spring-db1/
+      - title: "김영한"
+        children:
+          - title: "spring-db1"
+            url: /categories/spring-db1/
