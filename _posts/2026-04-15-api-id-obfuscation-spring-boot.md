@@ -336,9 +336,15 @@ class InvalidObfuscatedIdException(
     │  PUT /target-infos/Lx3qN7pYvR2z
     │  Body: { "matchingResultId": "jKpEqWm9oR5x" }
     ▼
-[Spring MVC]
-    │  @DecryptId → DecryptIdConverter → 42 (PathVariable)
-    │  @EncryptId → EncryptIdDeserializer → 7 (RequestBody)
+[Spring MVC — PathVariable 처리]
+    │  @DecryptId 감지 → DecryptIdConverter.convert()
+    │  → idObfuscator.decode(TARGET_INFO, "Lx3qN7pYvR2z") → 42
+    ▼
+[Jackson — RequestBody 역직렬화]
+    │  EncryptIdAnnotationIntrospector.findDeserializer()
+    │  → @EncryptId(MATCHING_RESULT) 감지
+    │  → EncryptIdDeserializer(idObfuscator, MATCHING_RESULT) 인스턴스 생성
+    │  → idObfuscator.decode(MATCHING_RESULT, "jKpEqWm9oR5x") → 7
     ▼
 [Controller]
     │  targetInfoId: Long = 42
@@ -347,8 +353,11 @@ class InvalidObfuscatedIdException(
 [Service / Domain]
     │  원본 Long ID로 비즈니스 로직 수행
     ▼
-[Controller → Response DTO]
-    │  @EncryptId → EncryptIdSerializer
+[Jackson — Response 직렬화]
+    │  EncryptIdAnnotationIntrospector.findSerializer()
+    │  → @EncryptId(TARGET_INFO) 감지
+    │  → EncryptIdSerializer(idObfuscator, TARGET_INFO) 인스턴스 생성
+    │  → idObfuscator.encode(TARGET_INFO, 42) → "Lx3qN7pYvR2z"
     ▼
 [클라이언트]
     {
@@ -356,6 +365,8 @@ class InvalidObfuscatedIdException(
       "matchingResultId": "jKpEqWm9oR5x"
     }
 ```
+
+포인트는 `EncryptIdAnnotationIntrospector`가 각 필드의 `@EncryptId` 어노테이션을 읽고, 해당 `ObfuscationType`에 맞는 Serializer/Deserializer를 **그때그때 인스턴스로 생성**한다는 것이다. Bean으로 등록된 하나의 Serializer가 아니라, 필드마다 다른 `ObfuscationType`을 가진 별도 인스턴스가 만들어진다.
 
 ## 테스트 전략
 
