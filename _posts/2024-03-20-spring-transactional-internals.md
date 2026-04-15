@@ -228,7 +228,7 @@ class SomeService {
 private fun someMethod() { ... }  // ❌ 동작하지 않음
 ```
 
-CGLIB은 클래스 상속 기반으로 프록시를 만들기 때문에 `private` 메서드는 오버라이드할 수 없다. `public` 또는 `protected` 메서드에만 적용 가능하다.
+Spring은 `@Transactional`을 **`public` 메서드에서만** 적용한다. `private`이나 `protected`에 붙이면 에러 없이 조용히 무시된다. CGLIB이 `protected`를 오버라이드할 수는 있지만, Spring이 의도적으로 `public`만 허용하는 정책이다.
 
 ### 7-3. Kotlin의 final 클래스와 kotlin-spring 플러그인
 
