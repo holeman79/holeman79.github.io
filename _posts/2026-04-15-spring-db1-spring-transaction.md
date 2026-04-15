@@ -1,6 +1,6 @@
 ---
 title: "[스프링 DB 1편 - 4] 스프링과 문제 해결 — 트랜잭션"
-date: 2026-04-15
+date: 2026-04-15 18:03:00 +0900
 categories: [spring-db1]
 tags: [spring, transaction, transactional, aop, proxy, inflearn, 김영한]
 toc: true
