@@ -1,6 +1,6 @@
 ---
 title: "트랜잭션의 한계와 분산 시스템에서의 데이터 정합성"
-date: 2026-04-15
+date: 2024-01-20
 categories: [Infra]
 tags: [transaction, distributed-system, eventual-consistency, outbox-pattern, idempotency]
 toc: true
