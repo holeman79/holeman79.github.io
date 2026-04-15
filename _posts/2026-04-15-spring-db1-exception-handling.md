@@ -1,5 +1,5 @@
 ---
-title: "[스프링 DB 1편] 스프링과 문제 해결 — 예외 처리, 반복"
+title: "[스프링 DB 1편 - 6] 스프링과 문제 해결 — 예외 처리, 반복"
 date: 2026-04-15
 categories: [spring-db1]
 tags: [spring, exception, jdbctemplate, datasource, inflearn, 김영한]

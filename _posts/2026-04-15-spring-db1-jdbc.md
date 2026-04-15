@@ -1,5 +1,5 @@
 ---
-title: "[스프링 DB 1편] JDBC 이해"
+title: "[스프링 DB 1편 - 1] JDBC 이해"
 date: 2026-04-15
 categories: [spring-db1]
 tags: [spring, jdbc, database, inflearn, 김영한]

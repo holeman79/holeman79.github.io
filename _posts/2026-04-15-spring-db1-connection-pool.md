@@ -1,5 +1,5 @@
 ---
-title: "[스프링 DB 1편] 커넥션풀과 데이터소스 이해"
+title: "[스프링 DB 1편 - 2] 커넥션풀과 데이터소스 이해"
 date: 2026-04-15
 categories: [spring-db1]
 tags: [spring, connection-pool, datasource, hikaricp, inflearn, 김영한]

@@ -1,5 +1,5 @@
 ---
-title: "[스프링 DB 1편] 자바 예외 이해"
+title: "[스프링 DB 1편 - 5] 자바 예외 이해"
 date: 2026-04-15
 categories: [spring-db1]
 tags: [spring, java, exception, checked-exception, unchecked-exception, inflearn, 김영한]

@@ -1,5 +1,5 @@
 ---
-title: "[스프링 DB 1편] 트랜잭션 이해"
+title: "[스프링 DB 1편 - 3] 트랜잭션 이해"
 date: 2026-04-15
 categories: [spring-db1]
 tags: [spring, transaction, acid, db-lock, inflearn, 김영한]
