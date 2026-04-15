@@ -368,6 +368,39 @@ class InvalidObfuscatedIdException(
 
 포인트는 `EncryptIdAnnotationIntrospector`가 각 필드의 `@EncryptId` 어노테이션을 읽고, 해당 `ObfuscationType`에 맞는 Serializer/Deserializer를 **그때그때 인스턴스로 생성**한다는 것이다. Bean으로 등록된 하나의 Serializer가 아니라, 필드마다 다른 `ObfuscationType`을 가진 별도 인스턴스가 만들어진다.
 
+### Jackson의 Serializer 결정 순서
+
+`AnnotationIntrospector.pair()`로 등록했기 때문에, Jackson은 필드를 직렬화할 때 체인 형태로 Serializer를 찾는다.
+
+```
+필드 직렬화 시:
+
+1. EncryptIdAnnotationIntrospector.findSerializer() 호출
+   → @EncryptId 있으면 EncryptIdSerializer 반환 ✅ 여기서 결정
+   → 없으면 null 반환
+       ↓
+2. 기존 AnnotationIntrospector에게 위임
+   → @JsonSerialize 있으면 해당 Serializer 반환
+   → 없으면 null 반환
+       ↓
+3. 타입 기반 기본 Serializer 사용
+   → String  → StringSerializer
+   → Long    → NumberSerializer
+   → List    → CollectionSerializer
+   → Boolean → BooleanSerializer
+   → 등등
+```
+
+`ObjectMapper`에 등록할 때 `pair()`를 사용하는 이유가 여기에 있다.
+
+```kotlin
+objectMapper.setAnnotationIntrospector(
+    AnnotationIntrospector.pair(introspector, existing)  // 우리 것 + 기존 것
+)
+```
+
+`pair`의 첫 번째 인자가 우선 적용되고, null을 반환하면 두 번째(기존)에게 위임한다. 만약 `pair` 없이 우리 것만 등록하면 `@JsonProperty` 같은 기존 Jackson 어노테이션이 동작하지 않게 된다. `@EncryptId`가 붙은 필드만 커스텀 처리되고, 나머지는 기존 Jackson 동작 그대로 유지된다.
+
 ## 테스트 전략
 
 ### 단위 테스트
