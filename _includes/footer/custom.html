@@ -1,1 +1,73 @@
+<style>
+.visitor-counter {
+  padding: 15px 0;
+  margin: 0 0 10px 0;
+  text-align: center;
+  border-bottom: 1px solid #393939;
+}
+.visitor-counter__title {
+  font-size: 0.8em;
+  color: #999;
+  margin-bottom: 5px;
+}
+.visitor-counter__total {
+  font-size: 1.8em;
+  font-weight: bold;
+  color: #eee;
+  margin-bottom: 8px;
+}
+.visitor-counter__daily {
+  font-size: 0.75em;
+  color: #999;
+  line-height: 1.8;
+}
+</style>
 
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var sidebar = document.querySelector('.sidebar');
+  var authorProfile = document.querySelector('.h-card');
+  if (!sidebar || !authorProfile) return;
+
+  var widget = document.createElement('div');
+  widget.className = 'visitor-counter';
+  widget.innerHTML =
+    '<div class="visitor-counter__title">전체 방문자</div>' +
+    '<div class="visitor-counter__total" id="vc-total">-</div>' +
+    '<div class="visitor-counter__daily">' +
+      'Today : <span id="vc-today">-</span><br>' +
+      'Yesterday : <span id="vc-yesterday">-</span>' +
+    '</div>';
+  authorProfile.parentNode.insertBefore(widget, authorProfile.nextSibling);
+
+  var now = new Date();
+  var today = now.toISOString().slice(0, 10);
+  var yd = new Date(now.getTime() - 86400000);
+  var yesterday = yd.toISOString().slice(0, 10);
+
+  // Track daily visit (once per session)
+  var checkGC = setInterval(function() {
+    if (window.goatcounter && window.goatcounter.count) {
+      clearInterval(checkGC);
+      if (!sessionStorage.getItem('gc-daily-' + today)) {
+        window.goatcounter.count({ path: 'daily-' + today, event: true });
+        sessionStorage.setItem('gc-daily-' + today, '1');
+      }
+    }
+  }, 200);
+
+  // Fetch counts
+  var base = 'https://holeman79.goatcounter.com/counter/';
+
+  function fetchCount(path, elId, fallback) {
+    fetch(base + encodeURIComponent(path) + '.json')
+      .then(function(r) { if (!r.ok) throw new Error(); return r.json(); })
+      .then(function(d) { document.getElementById(elId).textContent = d.count; })
+      .catch(function() { document.getElementById(elId).textContent = fallback; });
+  }
+
+  fetchCount('any', 'vc-total', '-');
+  fetchCount('daily-' + today, 'vc-today', '0');
+  fetchCount('daily-' + yesterday, 'vc-yesterday', '0');
+});
+</script>
