@@ -24,6 +24,10 @@ include:
 paginate: 10
 paginate_path: /page:num/
 
+# 홈("전체보기")에서 숨길 사이드바 섹션 제목
+# (이 섹션 하위의 모든 카테고리 URL이 자동으로 홈에서 제외됨)
+home_exclude_nav_section: "Inflearn"
+
 # Author
 author:
   name: "holeman79"

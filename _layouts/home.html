@@ -1,0 +1,57 @@
+---
+layout: archive
+---
+
+{{ content }}
+
+<h3 class="archive__subtitle">{{ site.data.ui-text[site.locale].recent_posts | default: "Recent Posts" }}</h3>
+
+{%- comment -%}
+  navigation.yml의 `home_exclude_nav_section` 섹션 하위 모든 카테고리 URL을 모아서
+  해당 카테고리에 속한 글은 홈에서 숨긴다.
+{%- endcomment -%}
+{%- assign excluded_str = "" -%}
+{%- for item in site.data.navigation.sidebar-categories -%}
+  {%- if item.title == site.home_exclude_nav_section -%}
+    {%- for child in item.children -%}
+      {%- if child.url -%}
+        {%- assign slug = child.url | remove: "/categories/" | remove: "/" -%}
+        {%- assign excluded_str = excluded_str | append: slug | append: "," -%}
+      {%- endif -%}
+      {%- for grandchild in child.children -%}
+        {%- if grandchild.url -%}
+          {%- assign slug = grandchild.url | remove: "/categories/" | remove: "/" -%}
+          {%- assign excluded_str = excluded_str | append: slug | append: "," -%}
+        {%- endif -%}
+        {%- for ggchild in grandchild.children -%}
+          {%- if ggchild.url -%}
+            {%- assign slug = ggchild.url | remove: "/categories/" | remove: "/" -%}
+            {%- assign excluded_str = excluded_str | append: slug | append: "," -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+    {%- endfor -%}
+  {%- endif -%}
+{%- endfor -%}
+{%- assign excluded = excluded_str | split: "," -%}
+
+{% if paginator %}
+  {% assign posts = paginator.posts %}
+{% else %}
+  {% assign posts = site.posts %}
+{% endif %}
+
+{% for post in posts %}
+  {% assign skip = false %}
+  {% for cat in post.categories %}
+    {% if excluded contains cat %}
+      {% assign skip = true %}
+      {% break %}
+    {% endif %}
+  {% endfor %}
+  {% unless skip %}
+    {% include archive-single.html %}
+  {% endunless %}
+{% endfor %}
+
+{% include paginator.html %}
