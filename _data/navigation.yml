@@ -17,6 +17,8 @@ sidebar-categories:
     url: /categories/database/
   - title: "Infra"
     url: /categories/infra/
+  - title: "Clean Code/Architecture"
+    url: /categories/clean-code-architecture/
   - title: "Inflearn"
     children:
       - title: "김영한"
