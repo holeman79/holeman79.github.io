@@ -27,6 +27,62 @@ tags: [spring, vault, config-server, kubernetes, devops, secret-management]
 | 비민감 설정 | Git Repo | PR + merge | DB 호스트, 포트, feature flag |
 | 민감 정보 | Vault | UI/CLI에서 직접 수정 | 비밀번호, 토큰, 인증서 |
 
+## K8s ConfigMap/Secret만으로는 안 되나?
+
+자연스러운 질문이다. K8s는 이미 ConfigMap·Secret이라는 일급 리소스를 제공한다. 이걸로 시작해서 꽤 멀리까지 갈 수 있다. 그런데 어느 시점부터는 한계가 드러난다.
+
+### 비교
+
+| 항목 | K8s ConfigMap/Secret | Config Server + Vault |
+|---|---|---|
+| 비밀번호 보호 | Secret = base64 인코딩(평문에 가까움). etcd encryption은 별도 설정 | Vault 내부 암호화, KMS/HSM 통합 가능 |
+| 변경 추적 | 현재 값만 보임. 누가 언제 바꿨는지는 별도 audit log 구성 필요 | KV v2 자동 버저닝 + Vault audit log 내장 |
+| 시크릿 회전 | 수동 (Secret 재생성 + Pod 재시작) | TTL·Lease, 동적 자격증명, 자동 회전 |
+| 권한 분리 | namespace/resource 단위 RBAC | **path 단위 ACL** (`secret/app-a/*`만 read 등) |
+| 환경/네임스페이스 공유 | 네임스페이스마다 별도 생성·복제 | 단일 진입점, 같은 시크릿 여러 앱이 참조 가능 |
+| 외부 시스템 연동 | 정적 값만 가능 | DB·AWS·GCP 동적 자격증명 발급 가능 |
+| 변경 시 반영 | Pod에 마운트된 ConfigMap은 수십 초~분 지연. Secret도 마찬가지 | 앱 재시작 시 Config Server에서 즉시 최신값 |
+| 추가 인프라 | 없음 | Vault·Config Server Pod 운영 필요 |
+| 학습 곡선 | 낮음 | 중간 (sealed/unsealed, policy, lease 등 개념 학습) |
+
+### 어떤 점이 실제로 차이를 만드나
+
+표로 보면 항목이 많아 보이지만, 실제 운영에서 차이를 만드는 건 보통 다음 4가지다.
+
+**1. "누가 언제 무엇을 바꿨는가"에 답할 수 있는가**
+ConfigMap/Secret은 `kubectl edit`로 누구나 즉시 바꿀 수 있고, 이전 값은 사라진다. Vault는 KV v2의 자동 버저닝으로 이전 값을 그대로 보존하며, 잘못 push했을 때 한 클릭으로 롤백할 수 있다. 운영 중 "어제까지는 멀쩡했는데" 상황이 발생했을 때 차이가 크다.
+
+**2. 권한 분리의 입자(granularity)**
+K8s RBAC은 "이 namespace의 secret을 읽을 수 있다/없다"까지가 한계다. 같은 namespace 안의 여러 시크릿 중 일부만 노출하는 건 어렵다. Vault는 path 단위 ACL이라 `secret/app-a/dev/*`만 read, `secret/app-a/prd/*`은 거부 같은 정책을 자연스럽게 쓴다.
+
+**3. 동적 자격증명(Dynamic Secrets)**
+K8s Secret에 박힌 DB 비밀번호는 **장기 보관 비밀번호**다. 누군가 한 번이라도 읽으면 그 값은 영원히 노출된 셈이고, 회전 외에는 방법이 없다. Vault의 [database secrets engine](https://developer.hashicorp.com/vault/docs/secrets/databases)은 요청 시점에 **TTL이 짧은 일회성 자격증명**을 발급한다. 앱이 죽으면 자격증명도 자동 만료된다. 보안 모델 자체가 다르다.
+
+**4. 시크릿 분포**
+서비스가 늘어나면 같은 DB 비밀번호가 여러 namespace의 Secret에 박히기 시작한다. 한 곳을 바꾸면 다른 곳들이 깨지고, 어디까지 퍼져 있는지 추적이 안 된다. Vault는 단일 진입점이라 이 문제가 원천 차단된다.
+
+### 그럼에도 K8s Secret이 정답인 경우
+
+- 서비스가 1~2개, 시크릿이 손에 꼽을 수준
+- 시크릿 회전 요구가 낮은 환경 (개발용 내부 도구 등)
+- Vault Pod까지 운영할 인력이 없을 때
+
+이때는 **억지로 Vault까지 안 가도 된다.** 대신 다음 위생 조치는 챙기자.
+
+- **etcd encryption at rest 활성화** (K8s 기본은 꺼져 있다)
+- Secret을 Git에 평문으로 커밋하지 말고, **Sealed Secrets**(Bitnami) 또는 **External Secrets Operator** 같은 중간 단계 도입
+- 회전 주기와 담당자를 적어도 문서로 정의
+
+### 결정 기준
+
+대략 다음 신호가 보이면 Config Server + Vault 도입을 검토할 시점이다.
+
+- 같은 비밀번호가 여러 namespace나 Secret에 **흩어져 있다**
+- "이 값 누가 언제 바꿨지?"라는 질문에 답하기 어렵다
+- 시크릿 회전을 분기/반기 단위로라도 **강제**하고 싶다
+- DB·외부 API 자격증명을 **동적으로 발급**하고 싶다 (장기 보관 비밀번호 폐지)
+- 같은 클러스터에서 **여러 팀이 다른 시크릿 집합**을 공유한다
+
 ## 아키텍처 개요
 
 ```
