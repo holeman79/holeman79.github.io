@@ -15,6 +15,9 @@ sidebar-categories:
     url: /categories/spring/
   - title: "Database"
     url: /categories/database/
+    children:
+      - title: "Elasticsearch"
+        url: /categories/elasticsearch/
   - title: "Infra"
     url: /categories/infra/
   - title: "Clean Code/Architecture"
