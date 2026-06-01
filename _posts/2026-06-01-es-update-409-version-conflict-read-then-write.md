@@ -23,7 +23,22 @@ org.elasticsearch.client.ResponseException:
 
 신기한 점은 Kafka container가 retry로 두 번째 시도에서 매끄럽게 처리해 **데이터 손실은 없었다**는 것이다. 그럼에도 첫 시도가 ERROR로 찍히면서 알람만 울렸다. "retry로 복구됐으니 알람 강등만 하면 되겠지" 싶었는데, 그 자리에 멈추면 같은 사고가 반복될 가능성이 컸다.
 
-이 글은 그 디버깅 과정과, **ES `_update`의 OCC 모델을 모르고 짠 read-then-write 코드가 어떻게 동시성 사고를 부르는지**, 그리고 두 단계로 갈라지는 fix(`retry_on_conflict` → painless script)를 정리한다.
+이 글은 그 디버깅 과정과, **ES `_update`의 OCC(Optimistic Concurrency Control) 모델을 모르고 짠 read-then-write 코드가 어떻게 동시성 사고를 부르는지**, 그리고 두 단계로 갈라지는 fix(`retry_on_conflict` → painless script)를 정리한다.
+
+> **잠깐, OCC (Optimistic Concurrency Control) 가 뭔지부터**
+>
+> **OCC(낙관적 동시성 제어)** 는 "동시에 같은 데이터를 수정하는 경우는 드물 거다"라고 **낙관적으로** 가정하고, 락을 걸지 않은 채 일단 작업을 진행한 뒤 **쓰기 직전에만 버전을 비교해 충돌을 검증**하는 동시성 모델이다. RDBMS의 `SELECT FOR UPDATE` 같은 PCC(Pessimistic Concurrency Control, 비관적 동시성 제어)가 "충돌이 자주 날 거다"라고 비관해 미리 락을 잡는 것과 정반대다.
+>
+> | | OCC | PCC |
+> |---|----|----|
+> | 가정 | 충돌이 드물다 | 충돌이 자주 난다 |
+> | 동시 접근 | 막지 않음 | 락으로 차단 |
+> | 충돌 검증 시점 | **쓰기 직전** (버전 비교) | 사전 (락 획득 시) |
+> | 충돌 시 | 호출자에게 "충돌!" 알려 재시도 결정 | 대기 또는 deadlock |
+> | 장점 | 락 오버헤드 0, 분산 시스템에 적합 | 일관성 보장이 직관적 |
+> | 단점 | 충돌 잦으면 재시도 비용 폭증 | 락 대기/데드락 |
+>
+> ES는 분산 시스템이라 노드 간 락이 비싸서 OCC가 자연스러운 선택이다. 모든 문서는 `_seq_no`(쓰기 순번)와 `_primary_term`(현재 primary shard 세대) 두 값으로 버전을 표현하고, 쓰기 시점에 클라이언트가 알고 있던 버전과 ES 측의 현재 버전이 다르면 `version_conflict_engine_exception(409)`을 던진다. 사용자가 본문에서 보게 될 모든 409는 이 모델의 정상 동작이다 — **버그가 아니라 ES가 "당신이 본 버전은 이미 낡았다"라고 알려주는 신호**.
 
 ---
 
