@@ -184,7 +184,7 @@ fun updateDocumentTags(index: String, docId: String, tags: List<Map<String, Any>
 
 ---
 
-## 4. 더 나아간 fix — painless script로 application read-then-write를 제거
+## 4. 더 나아간 fix — read-then-write의 race window 자체를 없애는 세 가지 길
 
 `retry_on_conflict`만으로도 운영에서 99% 사라진다. 하지만 우리 read-then-write 패턴은 여전히 남는다.
 
@@ -196,14 +196,83 @@ docs.forEach { doc ->
 }
 ```
 
-② 단계의 비즈니스 로직(`removeTagsByAssetIds`)이 단순한 컬렉션 필터링이라면, **ES 측에 painless script로 위임하는 것이 race window 자체를 없앤다**.
+본질적으로 이 패턴을 어떻게 풀까. 세 가지 길이 있고, 트레이드오프가 다르다.
+
+### 4-A. Application retry loop — `if_seq_no` 명시 + 도메인 로직은 그대로 Kotlin/Java로
+
+가장 정직하고 명시적인 길. **GET 시점의 `seqNo`/`primaryTerm`을 그대로 update 요청에 실어 보내고**, 충돌이 나면 catch해서 다시 read-modify-update를 돌린다. ES `_update`의 `retry_on_conflict`가 ES 노드 안에서 하던 일을 **애플리케이션 단에서 명시적으로** 표현하는 것.
+
+매번 boilerplate를 쓸 수는 없으니 helper로 한 번 캡슐화해 두자.
+
+```kotlin
+/**
+ * OCC update helper. modify 가 null 을 반환하면 변경 없음으로 간주해 skip.
+ * 409 충돌 시 maxAttempts 까지 다시 read → modify → update 재시도.
+ */
+fun <T : Any> ElasticsearchClient.updateWithOcc(
+    index: String,
+    docId: String,
+    type: Class<T>,
+    maxAttempts: Int = 5,
+    modify: (T) -> T?,
+) {
+    repeat(maxAttempts) { attempt ->
+        val getResp = this.get({ g -> g.index(index).id(docId) }, type)
+        if (!getResp.found()) return
+        val current = getResp.source() ?: return
+        val updated = modify(current) ?: return       // null = no change
+
+        try {
+            this.update<Void, T>(
+                { u -> u
+                    .index(index).id(docId).doc(updated)
+                    .ifSeqNo(getResp.seqNo()!!)
+                    .ifPrimaryTerm(getResp.primaryTerm()!!)
+                },
+                Void::class.java,
+            )
+            return
+        } catch (e: ResponseException) {
+            if (e.response.statusLine.statusCode != 409) throw e
+            // 다음 iteration 에서 새 seqNo 로 재시도
+        }
+    }
+    throw IllegalStateException("OCC retry exceeded ($maxAttempts) for $index/$docId")
+}
+```
+
+호출부는 **순수 Kotlin 람다**로 비즈니스 로직만 적는다.
+
+```kotlin
+fun removeTagsByAssetIds(index: String, docId: String, assetIds: List<String>) {
+    esClient.updateWithOcc(index, docId, TagDoc::class.java) { current ->
+        val filtered = current.tagMessages.filter { it.assetId !in assetIds }
+        if (filtered.size == current.tagMessages.size) null            // 변경 없음
+        else current.copy(tagMessages = filtered)
+    }
+}
+```
+
+**장점**
+- 비즈니스 로직이 일반 Kotlin/Java로 표현돼 **IDE refactoring/타입 검사/단위 테스트가 그대로** 된다.
+- 도메인 객체에 행위(`copy`, `filter`)를 그대로 둘 수 있어 다른 곳에서 재사용 가능.
+- helper만 한 번 작성하면 모든 호출부가 boilerplate 0.
+
+**단점**
+- `_update` 한 번이 (GET + UPDATE) 두 번의 ES 호출이 된다 (단일 `_update`는 ES 안에서 GET을 한 번 더 하니 실은 비슷하지만, 명시적으로 round-trip이 늘긴 함).
+- 도메인 객체가 ES `_source`와 1:1로 매핑되는 별도 타입(`TagDoc`)을 가져야 한다.
+
+대부분의 케이스에 **이 옵션을 가장 먼저 권한다**. painless의 외부 코드 분리/디버깅 부담 없이 도메인 로직을 한 곳에 둘 수 있다.
+
+### 4-B. Painless script — 단순 컬렉션 조작은 ES 측 한 번에
+
+비즈니스 로직이 "리스트에서 특정 ID 제거", "필드 +1", "Map에 키 추가" 같은 단순 조작이라면 ES `_update` API의 [painless script](https://www.elastic.co/guide/en/elasticsearch/painless/current/index.html)에 위임할 수 있다. read 자체가 사라지고 GET-MODIFY-INDEX 사이클이 ES 노드 안에서 1ms 안에 끝난다.
 
 ```kotlin
 fun removeTagsByAssetIdsAtomic(index: String, docId: String, assetIds: List<String>) {
     esClient.update<Void, Map<String, Any>>(
         { u -> u
-            .index(index)
-            .id(docId)
+            .index(index).id(docId)
             .script { s -> s.inline { i -> i
                 .lang("painless")
                 .source("""
@@ -215,17 +284,58 @@ fun removeTagsByAssetIdsAtomic(index: String, docId: String, assetIds: List<Stri
             }}
             .retryOnConflict(3)
         },
-        Void::class.java
+        Void::class.java,
     )
 }
 ```
 
-이러면 다음 두 가지가 동시에 해결된다.
+**장점**
+- 정말로 race window 자체가 사라진다 (ES 노드 안에서 atomic).
+- 네트워크 round-trip 1번.
 
-1. **application 단의 read가 사라진다** — `findDocumentsWithTagIds` 호출이 통째로 빠진다. 네트워크 라운드트립도 절약.
-2. **MODIFY가 ES 노드 안에서 일어난다** — GET과 INDEX 사이의 짧은 ES 내부 사이클 안에서 처리되고, `retry_on_conflict`까지 더해지면 사실상 conflict가 안 보인다.
+**단점**
+- 도메인 로직이 **문자열 안에 하드코딩**된다. Kotlin/Java IDE의 타입 검사/refactoring이 안 먹는다. (이름 바꿔도 script 안 문자열은 자동 갱신 X)
+- 단위 테스트가 까다롭다 — script 동작을 검증하려면 **실제 ES integration test**가 필요.
+- 도메인 로직이 두 곳(application 클래스 + painless script)으로 흩어진다.
+- 분기·복잡한 비즈니스 규칙으로 가면 painless 안에 if/loop이 늘어 가독성이 떨어진다.
 
-> painless script는 도메인 로직이 너무 복잡해지면 디버깅이 어렵다. 단순 컬렉션 조작(`removeIf`, `add`, `replace`)까지가 적정선이고, "현재 상태에 따라 분기/여러 인덱스를 봐야 하는" 로직이라면 application 단에 두는 게 유지보수에 낫다.
+→ "단순 컬렉션 조작" 이상으로 가면 권하지 않는다. 4-A 의 application retry loop가 거의 항상 더 낫다.
+
+### 4-C. Kafka partition key를 docId로 통일 — race 자체를 구조적으로 차단
+
+지금까지의 옵션은 "충돌이 나면 어떻게 푸느냐"였다면, 4-C는 **충돌이 절대 안 나는 구조로 바꾸는** 길이다.
+
+Kafka는 같은 partition 안의 메시지를 **순차 처리(strict ordering)** 보장한다. 같은 docId의 메시지를 항상 같은 partition으로 보내면, 같은 consumer thread가 직렬로 처리하므로 **자기 자신 외에 같은 docId를 동시에 update할 다른 writer가 producer 차원에서 사라진다.**
+
+```kotlin
+// Producer 측
+kafkaTemplate.send(TOPIC, /* key = */ docId, payload)
+```
+
+`KafkaTemplate.send`의 두 번째 인자가 partition key다. 같은 key는 같은 partition으로 라우팅된다 (default `DefaultPartitioner` 기준).
+
+**장점**
+- **race 자체가 발생하지 않는다.** application/ES 양쪽 retry 코드도 필요 없어진다.
+- 처리 순서가 보존된다 (event sourcing류 패턴에 자연스럽게 어울림).
+
+**단점**
+- 같은 docId의 처리량이 **단일 consumer thread로 제한**된다. hot key가 있으면 그 키만 처리량이 막힌다.
+- 모든 update writer를 같은 topic으로 모아야 효과가 있다. 다른 모듈/팀의 writer가 별도 경로로 같은 문서를 건드리면 의미가 없다 — 그쪽도 이 구조를 따르거나, 4-A/4-B로 보강해야 한다.
+- 기존 producer에 partition key가 없거나 다른 값이라면 마이그레이션 비용이 있다.
+
+### 옵션 비교
+
+| | 4-A. application retry loop | 4-B. painless script | 4-C. partition key 통일 |
+|--|--|--|--|
+| **race 처리 방식** | 충돌 후 재시도 | ES 노드 안 atomic | 충돌 자체가 안 남 |
+| **도메인 로직 위치** | application (Kotlin) | painless script (문자열) | application (Kotlin) |
+| **단위 테스트** | 쉬움 (mock) | 어려움 (ES 필요) | 쉬움 |
+| **IDE 지원** | ◎ | △ | ◎ |
+| **ES 호출 수** | 2 (GET + UPDATE) | 1 (UPDATE script) | 1 (UPDATE) |
+| **다른 writer 차단** | X (다 같이 retry) | X | ◎ (구조적) |
+| **권장 케이스** | **대부분의 케이스** | 단순 컬렉션 조작 + 호출량 큰 hot path | hot key 없는 event 흐름 |
+
+내 디폴트는 **4-A**. painless가 정말 잘 맞는 좁은 케이스가 아니면 application retry loop를 쓰고, 추가로 4-C로 구조까지 정리할 수 있으면 더 깔끔하다.
 
 ---
 
@@ -265,8 +375,8 @@ class ConflictAwareRetryListener : RetryListener {
 정리하면 다음 4단계 체크리스트.
 
 1. **ES `_update`를 호출하는 모든 코드에 `retry_on_conflict` 가 있는가?** — 없으면 한 줄 추가.
-2. **`findDoc → modify → updateDoc` 패턴이 있는가?** — 있다면 painless script로 치환 가능한지 검토.
-3. **여러 writer가 같은 문서를 update할 수 있는가?** — Kafka topic 분리, partition key 통일, 또는 단일 writer 보장.
+2. **`findDoc → modify → updateDoc` 패턴이 있는가?** — 있다면 4-A의 `if_seq_no` 기반 application retry helper로 명시화. 정말 단순 컬렉션 조작이면 4-B의 painless script도 선택지.
+3. **여러 writer가 같은 문서를 update할 수 있는가?** — Kafka partition key를 docId로 통일해 race 자체를 차단(4-C). 다른 모듈의 writer까지 같은 흐름에 모을 수 있는지 검토.
 4. **Kafka retry 첫 시도 실패가 ERROR로 찍히는가?** — 첫 실패는 WARN, 최종 실패만 ERROR로 분리.
 
 ES OCC는 잘 만들어진 메커니즘이지만, 사용자가 그 모델을 모른 채 application 단에서 read-then-write를 하면 그 안전망이 무력해진다. 충돌은 race condition이 발생할 수 있다는 신호이고, **신호를 retry로 묻어두는 대신 동시성 모델을 코드에 명시적으로 드러내는 것**이 핵심이다.
