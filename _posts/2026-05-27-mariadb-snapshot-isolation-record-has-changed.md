@@ -1,7 +1,7 @@
 ---
 title: "MariaDB 11.6+ snapshot isolation과 'Record has changed since last read' 디버깅"
 date: 2026-05-27 23:14:00 +0900
-categories: [Database]
+categories: [Database, RDB]
 tags: [mariadb, innodb, snapshot-isolation, transaction-isolation, repeatable-read, upsert, react-strictmode, kotlin, exposed]
 toc: true
 toc_sticky: true

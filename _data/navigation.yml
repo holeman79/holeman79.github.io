@@ -16,6 +16,8 @@ sidebar-categories:
   - title: "Database"
     url: /categories/database/
     children:
+      - title: "RDB"
+        url: /categories/rdb/
       - title: "Elasticsearch"
         url: /categories/elasticsearch/
   - title: "Infra"
